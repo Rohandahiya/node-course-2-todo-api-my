@@ -1,56 +1,102 @@
-var express = require('express');
-var bodyParser = require('body-parser');
-var {ObjectID} = require('mongodb');
+const expect = require('expect');
+const request = require('supertest');
+const {ObjectID} = require('mongodb');
 
-var {mongoose} = require('./db/mongoose');
-var {Todo} = require('./models/todo');
-var {User} = require('./models/user');
+const {app} = require('./../server');
+const {Todo} = require('./../models/todo');
 
-var app = express();
-const port = process.env.PORT || 3000;
+const todos = [{
+  _id: new ObjectID(),
+  text: 'First test todo'
+}, {
+  _id: new ObjectID(),
+  text: 'Second test todo'
+}];
 
-app.use(bodyParser.json());
+beforeEach((done) => {
+  Todo.remove({}).then(() => {
+    return Todo.insertMany(todos);
+  }).then(() => done());
+});
 
-app.post('/todos', (req, res) => {
-  var todo = new Todo({
-    text: req.body.text
+describe('POST /todos', () => {
+  it('should create a new todo', (done) => {
+    var text = 'Test todo text';
+
+    request(app)
+      .post('/todos')
+      .send({text})
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.text).toBe(text);
+      })
+      .end((err, res) => {
+        if (err) {
+          return done(err);
+        }
+
+        Todo.find({text}).then((todos) => {
+          expect(todos.length).toBe(1);
+          expect(todos[0].text).toBe(text);
+          done();
+        }).catch((e) => done(e));
+      });
   });
 
-  todo.save().then((doc) => {
-    res.send(doc);
-  }, (e) => {
-    res.status(400).send(e);
+  it('should not create todo with invalid body data', (done) => {
+    request(app)
+      .post('/todos')
+      .send({})
+      .expect(400)
+      .end((err, res) => {
+        if (err) {
+          return done(err);
+        }
+
+        Todo.find().then((todos) => {
+          expect(todos.length).toBe(2);
+          done();
+        }).catch((e) => done(e));
+      });
   });
 });
 
-app.get('/todos', (req, res) => {
-  Todo.find().then((todos) => {
-    res.send({todos});
-  }, (e) => {
-    res.status(400).send(e);
+describe('GET /todos', () => {
+  it('should get all todos', (done) => {
+    request(app)
+      .get('/todos')
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.todos.length).toBe(2);
+      })
+      .end(done);
   });
 });
 
-app.get('/todos/:id', (req, res) => {
-  var id = req.params.id;
+describe('GET /todos/:id', () => {
+  it('should return todo doc', (done) => {
+    request(app)
+      .get(`/todos/${todos[0]._id.toHexString()}`)
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.todo.text).toBe(todos[0].text);
+      })
+      .end(done);
+  });
 
-  if (!ObjectID.isValid(id)) {
-    return res.status(404).send();
-  }
+  it('should return 404 if todo not found', (done) => {
+    var hexId = new ObjectID().toHexString();
 
-  Todo.findById(id).then((todo) => {
-    if (!todo) {
-      return res.status(404).send();
-    }
+    request(app)
+      .get(`/todos/${hexId}`)
+      .expect(404)
+      .end(done);
+  });
 
-    res.send({todo});
-  }).catch((e) => {
-    res.status(400).send();
+  it('should return 404 for non-object ids', (done) => {
+    request(app)
+      .get('/todos/123abc')
+      .expect(404)
+      .end(done);
   });
 });
-
-app.listen(port, () => {
-  console.log(`Started up at port ${port}`);
-});
-
-module.exports = {app};
